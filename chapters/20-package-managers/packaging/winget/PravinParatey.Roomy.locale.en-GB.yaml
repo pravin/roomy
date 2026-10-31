@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
+PackageIdentifier: PravinParatey.Roomy
+PackageVersion: 1.0.0
+PackageLocale: en-GB
+Publisher: Pravin Paratey
+PublisherUrl: https://github.com/pravin
+PackageName: Roomy
+PackageUrl: https://github.com/pravin/roomy
+License: Apache-2.0
+LicenseUrl: https://github.com/pravin/roomy/blob/master/LICENSE
+ShortDescription: See what's filling your disk and clear out developer junk.
+Description: Roomy scans a disk or folder in seconds, shows what's taking up the space as a treemap, and finds developer junk like node_modules and build folders that you can safely throw away.
+Moniker: roomy
+Tags:
+  - disk-usage
+  - disk-space
+  - treemap
+  - cleaner
+  - developer-tools
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Roomy",
+  "version": "1.0.0",
+  "identifier": "io.github.pravin.roomy",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Roomy",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 760,
+        "minHeight": 520
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Utility",
+    "shortDescription": "See what's filling your disk",
+    "longDescription": "Roomy scans a disk or folder in seconds, shows you what's taking up the space as a treemap, and finds developer junk like node_modules and build folders that you can safely throw away.",
+    "copyright": "© 2026 Pravin Paratey",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    },
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRDM0VCQUIwNTAyQUM5Q0UKUldUT3lTcFFzTG8rVE5YZkQ3c3UrblAyd2JXcWxDdWdrY3NiM3dyUWlqNzFzbFYxaVNYRm5MR0IK",
+      "endpoints": [
+        "https://github.com/pravin/roomy/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

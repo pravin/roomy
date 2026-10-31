@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Roomy</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <section id="start" class="screen">
+      <div class="start">
+        <header class="hero">
+          <img src="/logo.svg" alt="" width="64" height="64" />
+          <h1>Roomy</h1>
+          <p>See what's filling your disk.</p>
+        </header>
+        <h2 class="section-title">Scan</h2>
+        <div id="places" class="places"></div>
+        <div class="start-actions">
+          <button id="choose" class="primary" data-icon="folder">Choose a folder…</button>
+          <button id="open-settings" class="ghost" data-icon="settings">Settings</button>
+        </div>
+        <div id="recent" class="recent"></div>
+        <footer class="credit">
+          Made by Pravin Paratey ·
+          <a href="https://github.com/pravin/roomy" id="repo">github.com/pravin/roomy</a>
+          · <span id="version"></span>
+        </footer>
+      </div>
+    </section>
+
+    <section id="scanning" class="screen" hidden>
+      <div class="scanning">
+        <div class="pulse"><img src="/logo.svg" alt="" width="56" height="56" /></div>
+        <p class="big" id="scan-bytes">0 B</p>
+        <p class="stats"><span id="scan-files">0 files</span> · <span id="scan-time">0.0 s</span></p>
+        <div class="progress" id="scan-progress" hidden><div></div></div>
+        <p class="current" id="scan-current"></p>
+        <button id="cancel" class="ghost">Cancel</button>
+      </div>
+    </section>
+
+    <section id="results" class="screen" hidden>
+      <header class="toolbar">
+        <img src="/logo.svg" alt="Roomy" width="22" height="22" class="brand" />
+        <button id="up" class="icon-only" title="Up one folder (Backspace)" data-icon="up"></button>
+        <nav id="crumbs" class="crumbs"></nav>
+        <div class="tabs" role="tablist">
+          <button data-tab="map" class="active" data-icon="map">Disk</button>
+          <button data-tab="junk" data-icon="sparkle">Developer junk <span id="junk-badge" class="count" hidden></span></button>
+          <button data-tab="dupes" data-icon="copies">Duplicates</button>
+        </div>
+        <button id="rescan" class="icon-only" title="Scan again" data-icon="refresh"></button>
+        <button id="new-scan" class="ghost" title="Scan another folder or disk (⇧⌘N)" data-icon="plus">New scan</button>
+      </header>
+
+      <div id="tab-map" class="tab map-tab">
+        <aside class="list-pane">
+          <div class="list-head"><span>Name</span><span>Size</span></div>
+          <div id="list" class="list"></div>
+        </aside>
+        <div class="map-area">
+          <div class="map-wrap"><canvas id="map"></canvas></div>
+          <div id="legend" class="legend"></div>
+        </div>
+      </div>
+      <div id="tab-junk" class="tab panel" hidden></div>
+      <div id="tab-dupes" class="tab panel" hidden></div>
+
+      <footer id="details" class="details"></footer>
+    </section>
+
+    <div id="tooltip" class="tooltip" hidden></div>
+
+    <dialog id="settings">
+      <form method="dialog" class="settings">
+        <h2>Settings</h2>
+        <label class="check">
+          <input type="checkbox" id="set-one-fs" />
+          Stay on one drive
+          <small>Don't scan other disks or network shares mounted inside a folder.</small>
+        </label>
+        <label>
+          Ignore duplicates smaller than
+          <select id="set-min-dupe">
+            <option value="100000">100 KB</option>
+            <option value="1000000">1 MB</option>
+            <option value="10000000">10 MB</option>
+            <option value="100000000">100 MB</option>
+          </select>
+        </label>
+        <div>
+          Never scan
+          <ul id="set-exclude" class="exclude"></ul>
+          <button type="button" id="set-add-exclude" class="ghost" data-icon="plus">Add folder…</button>
+        </div>
+        <footer>
+          <button value="cancel" class="ghost">Cancel</button>
+          <button value="save" id="set-save" class="primary">Save</button>
+        </footer>
+      </form>
+    </dialog>
+  </body>
+</html>

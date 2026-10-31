@@ -1,0 +1,133 @@
+# Builds Roomy for every platform when a version tag like v1.0.0 is pushed,
+# and puts the installers on a draft GitHub release. Chapter 19 explains it.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CHAPTER: chapters/20-package-managers
+
+jobs:
+  app:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            args: --target universal-apple-darwin
+          - os: ubuntu-22.04
+            args: ""
+          - os: windows-latest
+            args: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux libraries for Tauri
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ env.CHAPTER }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+        working-directory: ${{ env.CHAPTER }}/app
+
+      # Signing is optional. Without these secrets you still get working
+      # installers, but macOS and Windows will warn people about them.
+      - name: Signing secrets, if there are any
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -n "${!name}" ]; then
+              {
+                echo "$name<<END_OF_SECRET"
+                echo "${!name}"
+                echo "END_OF_SECRET"
+              } >> "$GITHUB_ENV"
+            fi
+          done
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the update files so the app can trust them. Chapter 19.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: ${{ env.CHAPTER }}/app
+          tagName: ${{ github.ref_name }}
+          releaseName: Roomy ${{ github.ref_name }}
+          releaseBody: See the assets below to download Roomy for your computer.
+          releaseDraft: true
+          includeUpdaterJson: true
+          args: ${{ matrix.args }} --config {"bundle":{"createUpdaterArtifacts":true}}
+
+  cli:
+    needs: app
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ env.CHAPTER }}
+
+      - name: Build the command line tool
+        working-directory: ${{ env.CHAPTER }}
+        run: cargo build --release --locked -p roomy --target ${{ matrix.target }}
+
+      - name: Package and upload
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          name="roomy-cli-$version-${{ matrix.target }}"
+          dir="$CHAPTER/target/${{ matrix.target }}/release"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "$name.zip" "./$dir/roomy.exe"
+            gh release upload "$GITHUB_REF_NAME" "$name.zip" --clobber
+          else
+            tar -czf "$name.tar.gz" -C "$dir" roomy
+            gh release upload "$GITHUB_REF_NAME" "$name.tar.gz" --clobber
+          fi

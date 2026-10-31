@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.pravin.roomy</id>
+  <name>Roomy</name>
+  <summary>See what's filling your disk</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <developer id="io.github.pravin">
+    <name>Pravin Paratey</name>
+  </developer>
+  <description>
+    <p>
+      Roomy scans a disk or folder in seconds and shows you what's taking up
+      the space as a treemap. Its developer mode finds node_modules, build
+      folders and package caches that you can safely throw away, and it can
+      find duplicate files too.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.pravin.roomy.desktop</launchable>
+  <url type="homepage">https://github.com/pravin/roomy</url>
+  <url type="bugtracker">https://github.com/pravin/roomy/issues</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.0.0" date="2026-10-30"/>
+  </releases>
+</component>

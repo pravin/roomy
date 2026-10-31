@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Roomy</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <section id="start" class="screen">
+      <div class="start">
+        <header class="hero">
+          <img src="/logo.svg" alt="" width="64" height="64" />
+          <h1>Roomy</h1>
+          <p>See what's filling your disk.</p>
+        </header>
+        <div class="start-actions">
+          <button id="choose" class="primary" data-icon="folder">Choose a folder…</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="scanning" class="screen" hidden>
+      <div class="scanning">
+        <div class="pulse"><img src="/logo.svg" alt="" width="56" height="56" /></div>
+        <p class="big" id="scan-bytes">0 B</p>
+        <p class="stats"><span id="scan-files">0 files</span> · <span id="scan-time">0.0 s</span></p>
+        <p class="current" id="scan-current"></p>
+        <button id="cancel" class="ghost">Cancel</button>
+      </div>
+    </section>
+
+    <section id="results" class="screen" hidden>
+      <header class="toolbar">
+        <img src="/logo.svg" alt="Roomy" width="22" height="22" class="brand" />
+        <button id="up" class="icon-only" title="Up one folder (Backspace)" data-icon="up"></button>
+        <nav id="crumbs" class="crumbs"></nav>
+        <button id="rescan" class="icon-only" title="Scan again" data-icon="refresh"></button>
+        <button id="new-scan" class="ghost" title="Scan another folder" data-icon="plus">New scan</button>
+      </header>
+
+      <div id="tab-map" class="tab map-tab">
+        <aside class="list-pane" style="flex: 1">
+          <div class="list-head"><span>Name</span><span>Size</span></div>
+          <div id="list" class="list"></div>
+        </aside>
+      </div>
+
+      <footer id="details" class="details"></footer>
+    </section>
+
+  </body>
+</html>

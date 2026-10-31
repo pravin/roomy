@@ -1,0 +1,18 @@
+# Maintainer: Pravin Paratey
+# Repackages the .deb from the GitHub release, so there's nothing to build.
+pkgname=roomy-bin
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="See what's filling your disk and clear out developer junk"
+arch=('x86_64')
+url="https://github.com/pravin/roomy"
+license=('Apache-2.0')
+depends=('webkit2gtk-4.1' 'gtk3')
+provides=('roomy')
+conflicts=('roomy')
+source=("https://github.com/pravin/roomy/releases/download/v${pkgver}/Roomy_${pkgver}_amd64.deb")
+sha256sums=('REPLACE_WITH_SHA256')
+
+package() {
+  tar -xf data.tar.gz -C "${pkgdir}"
+}

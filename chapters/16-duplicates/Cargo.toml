@@ -1,0 +1,24 @@
+[workspace]
+members = ["core", "cli", "app/src-tauri"]
+resolver = "2"
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+license = "Apache-2.0"
+authors = ["Pravin Paratey"]
+repository = "https://github.com/pravin/roomy"
+
+[workspace.dependencies]
+roomy-core = { path = "core", version = "1.0.0" }
+rayon = "1.12"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+blake3 = "1.8"
+clap = { version = "4.6", features = ["derive"] }
+trash = "5.2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
