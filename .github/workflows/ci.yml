@@ -45,6 +45,11 @@ jobs:
             echo "::group::$chapter"
             (
               cd "$chapter"
+              # Every chapter's crates have the same names, so clear out the
+              # last chapter's copies or Cargo may reuse them here.
+              for crate in roomy roomy-core roomy-app; do
+                cargo clean -q -p "$crate" 2>/dev/null || true
+              done
               if [ -f app/package.json ]; then
                 (cd app && npm ci && npm run build)
               fi
