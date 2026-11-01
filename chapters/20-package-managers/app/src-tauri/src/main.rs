@@ -5,6 +5,7 @@ mod commands;
 mod menu;
 mod settings;
 
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, RwLock};
 
 use roomy_core::{Progress, Tree};
@@ -18,6 +19,8 @@ pub struct AppState {
     tree: RwLock<Option<Tree>>,
     /// The scan in progress, so it can be cancelled.
     progress: Mutex<Option<Arc<Progress>>>,
+    /// Set when you ask a move to the Trash to stop.
+    stop_trash: AtomicBool,
 }
 
 fn main() {
@@ -40,6 +43,7 @@ fn main() {
             commands::places,
             commands::scan,
             commands::cancel_scan,
+            commands::full_disk_access,
             commands::folder,
             commands::treemap,
             commands::categories,
@@ -47,6 +51,7 @@ fn main() {
             commands::open_item,
             commands::copy_path,
             commands::trash,
+            commands::cancel_trash,
             commands::junk,
             commands::duplicates,
             commands::get_settings,

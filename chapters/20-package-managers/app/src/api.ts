@@ -55,10 +55,17 @@ export interface Progress {
   seconds: number;
 }
 
+export interface TrashProgress {
+  done: number;
+  total: number;
+  bytes: number;
+}
+
 export interface ScanSummary {
   root: NodeView;
   seconds: number;
   errors: number;
+  guarded: number;
 }
 
 export interface Disk {
@@ -104,6 +111,8 @@ export const places = () => invoke<Places>("places");
 export const launchPath = () => invoke<string | null>("launch_path");
 export const scan = (path: string) => invoke<ScanSummary>("scan", { path });
 export const cancelScan = () => invoke<void>("cancel_scan");
+export const cancelTrash = () => invoke<void>("cancel_trash");
+export const fullDiskAccess = () => invoke<void>("full_disk_access");
 export const folder = (id?: NodeId) => invoke<FolderView>("folder", { id });
 export const treemap = (id: NodeId, width: number, height: number) =>
   invoke<Tile[]>("treemap", { id, width, height });
@@ -121,3 +130,6 @@ export const menuState = (scanned: boolean, picked: boolean) =>
 
 export const onProgress = (f: (p: Progress) => void): Promise<UnlistenFn> =>
   listen<Progress>("scan-progress", (e) => f(e.payload));
+
+export const onTrashProgress = (f: (p: TrashProgress) => void): Promise<UnlistenFn> =>
+  listen<TrashProgress>("trash-progress", (e) => f(e.payload));

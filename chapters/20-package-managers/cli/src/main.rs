@@ -118,6 +118,12 @@ fn scan(path: &Path, args: &ScanArgs) -> Result<Tree, String> {
     if progress.errors() > 0 {
         eprintln!("({} things couldn't be read)", thousands(progress.errors()));
     }
+    if progress.guarded() > 0 {
+        eprintln!(
+            "(Other apps' data in ~/Library was skipped, because macOS would ask about each one. \
+             Give your terminal Full Disk Access to include it.)"
+        );
+    }
     Ok(tree)
 }
 

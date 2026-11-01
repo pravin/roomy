@@ -66,6 +66,15 @@ body {
   color: var(--muted);
 }
 
+a.link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a.link:hover {
+  text-decoration: underline;
+}
+
 /* Buttons */
 
 button {
@@ -357,6 +366,45 @@ button.icon-only:hover:not(:disabled) {
   background: var(--accent);
   border-radius: 3px;
   transition: width 0.2s;
+}
+
+/* Shown over everything while things go to the Trash */
+
+.trashing {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: rgba(18, 21, 26, 0.35);
+}
+
+.trashing[hidden] {
+  display: none;
+}
+
+.trashing-box {
+  width: min(360px, 90vw);
+  padding: 22px 24px 14px;
+  background: var(--raised);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.trashing-box .big {
+  margin: 0 0 14px;
+  font-weight: 600;
+}
+
+.trashing-box .progress {
+  width: 100%;
+}
+
+.trashing-box .stats {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .scanning .current {

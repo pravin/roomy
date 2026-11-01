@@ -34,6 +34,9 @@ pub struct ScanOptions {
     pub one_file_system: bool,
     /// Folders to leave out completely.
     pub exclude: Vec<PathBuf>,
+    /// Folders to show but not look inside. On a Mac these are the ones
+    /// where every app's data is behind its own permission popup.
+    pub guarded: Vec<PathBuf>,
 }
 
 impl ScanOptions {
@@ -45,8 +48,20 @@ impl ScanOptions {
             // the exclude list there instead.
             one_file_system: !cfg!(target_os = "macos"),
             exclude: platform::default_excludes(),
+            guarded: guarded_folders(),
         }
     }
+}
+
+/// The folders we shouldn't look inside on this computer, right now.
+///
+/// macOS keeps each app's data in a folder of its own under
+/// `~/Library/Containers` and `~/Library/Group Containers`, and asks before
+/// letting another app in. It asks once per app, so a whole-disk scan
+/// would bring up hundreds of popups one after the other. Unless Roomy has
+/// Full Disk Access, which answers all of them at once, we skip those two.
+pub fn guarded_folders() -> Vec<PathBuf> {
+    platform::guarded_folders()
 }
 
 /// Counters the scanner updates as it goes. Any thread can read them while
@@ -56,6 +71,7 @@ pub struct Progress {
     files: AtomicU64,
     bytes: AtomicU64,
     errors: AtomicU64,
+    guarded: AtomicU64,
     cancelled: AtomicBool,
     current: Mutex<PathBuf>,
 }
@@ -75,6 +91,11 @@ impl Progress {
 
     pub fn errors(&self) -> u64 {
         self.errors.load(Ordering::Relaxed)
+    }
+
+    /// How many guarded folders we skipped.
+    pub fn guarded(&self) -> u64 {
+        self.guarded.load(Ordering::Relaxed)
     }
 
     /// The folder the scanner was in most recently.
@@ -189,6 +210,17 @@ fn scan_item(ctx: &Context, item: &DirEntry) -> Option<Entry> {
         if ctx.options.one_file_system && platform::device(&meta) != ctx.root_device {
             return None;
         }
+        if ctx.options.guarded.contains(&path) {
+            ctx.progress.guarded.fetch_add(1, Ordering::Relaxed);
+            return Some(Entry {
+                name: item.file_name(),
+                kind: Kind::Dir,
+                size: platform::disk_size(&meta),
+                files: 0,
+                unreadable: true,
+                children: Vec::new(),
+            });
+        }
         let mut entry = scan_dir(ctx, &path, item.file_name());
         entry.size += platform::disk_size(&meta);
         return Some(entry);
@@ -257,6 +289,28 @@ mod platform {
         };
         paths.iter().map(PathBuf::from).collect()
     }
+
+    #[cfg(target_os = "macos")]
+    pub fn guarded_folders() -> Vec<PathBuf> {
+        let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+            return Vec::new();
+        };
+        // Only Full Disk Access lets you open this file, and being turned
+        // away from it doesn't bring up a popup, so it's a quiet way to ask.
+        let tcc = home.join("Library/Application Support/com.apple.TCC/TCC.db");
+        if std::fs::File::open(tcc).is_ok() {
+            return Vec::new();
+        }
+        vec![
+            home.join("Library/Containers"),
+            home.join("Library/Group Containers"),
+        ]
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn guarded_folders() -> Vec<PathBuf> {
+        Vec::new()
+    }
 }
 
 #[cfg(not(unix))]
@@ -282,6 +336,10 @@ mod platform {
     }
 
     pub fn default_excludes() -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    pub fn guarded_folders() -> Vec<PathBuf> {
         Vec::new()
     }
 }
@@ -334,6 +392,24 @@ mod tests {
         };
         let tree = scan(dir.path(), &options, &Progress::new()).unwrap();
         assert_eq!(tree[tree.root()].files, 0);
+    }
+
+    #[test]
+    fn guarded_folders_are_shown_but_not_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("guarded")).unwrap();
+        write(&dir.path().join("guarded/big"), 100_000);
+        let options = ScanOptions {
+            guarded: vec![dir.path().join("guarded")],
+            ..ScanOptions::default()
+        };
+        let progress = Progress::new();
+        let tree = scan(dir.path(), &options, &progress).unwrap();
+        let root = &tree[tree.root()];
+        assert_eq!(root.files, 0);
+        assert_eq!(progress.guarded(), 1);
+        assert_eq!(progress.errors(), 0);
+        assert!(tree[root.children[0]].unreadable);
     }
 
     #[cfg(unix)]

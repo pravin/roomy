@@ -2,8 +2,10 @@
 //! function; `#[tauri::command]` does the work of turning JSON from the
 //! web page into arguments, and the return value back into JSON.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -158,6 +160,8 @@ pub struct ScanSummary {
     seconds: f64,
     /// Things we weren't allowed to read.
     errors: u64,
+    /// Folders we didn't look inside, to spare you a popup for each app.
+    guarded: u64,
 }
 
 /// Scans a folder. While it runs, the window gets a `scan-progress` event
@@ -173,7 +177,7 @@ pub async fn scan(app: AppHandle, path: PathBuf) -> Result<ScanSummary, String> 
     let handle = app.clone();
     let root = path.clone();
     let started = Instant::now();
-    let (result, seconds, errors) = tauri::async_runtime::spawn_blocking(move || {
+    let (result, seconds, errors, guarded) = tauri::async_runtime::spawn_blocking(move || {
         thread::scope(|s| {
             let scanner = s.spawn(|| {
                 let tree = roomy_core::scan(&root, &options, &progress);
@@ -186,7 +190,7 @@ pub async fn scan(app: AppHandle, path: PathBuf) -> Result<ScanSummary, String> 
                 thread::sleep(Duration::from_millis(100));
             }
             let (tree, seconds) = scanner.join().unwrap();
-            (tree, seconds, progress.errors())
+            (tree, seconds, progress.errors(), progress.guarded())
         })
     })
     .await
@@ -199,6 +203,7 @@ pub async fn scan(app: AppHandle, path: PathBuf) -> Result<ScanSummary, String> 
         root: NodeView::new(&tree, tree.root()),
         seconds,
         errors,
+        guarded,
     };
     *state.tree.write().unwrap() = Some(tree);
 
@@ -207,6 +212,17 @@ pub async fn scan(app: AppHandle, path: PathBuf) -> Result<ScanSummary, String> 
     settings.remember(path);
     settings::save(&app, &settings).ok();
     Ok(summary)
+}
+
+/// Opens the Full Disk Access page of System Settings, where you can let
+/// Roomy see every app's data without being asked about each one.
+#[tauri::command]
+pub fn full_disk_access() -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -346,27 +362,95 @@ pub struct TrashResult {
     failed: Vec<String>,
 }
 
-/// Moves things to the Trash and takes them out of the tree.
+#[derive(Clone, Serialize)]
+struct TrashProgress {
+    done: usize,
+    total: usize,
+    bytes: u64,
+}
+
+/// How many things to hand the Trash at once. On a Mac each batch is one
+/// request to the Finder, which takes about the same time for one file as
+/// for a hundred, so batching is what makes deleting thousands quick.
+const TRASH_BATCH: usize = 100;
+
+/// Moves things to the Trash and takes them out of the tree. While it runs,
+/// the window gets a `trash-progress` event after each batch.
 #[tauri::command]
-pub fn trash(state: State<AppState>, ids: Vec<NodeId>) -> Result<TrashResult, String> {
-    with_tree_mut(&state, |tree| {
-        let mut result = TrashResult {
-            freed: 0,
-            failed: Vec::new(),
-        };
-        for id in ids {
-            // Skip anything already gone, say because its folder went first.
-            if !tree.contains(id) || id == tree.root() {
-                continue;
+pub async fn trash(app: AppHandle, ids: Vec<NodeId>) -> Result<TrashResult, String> {
+    app.state::<AppState>()
+        .stop_trash
+        .store(false, Ordering::Relaxed);
+    // Work out what to delete, then let go of the tree while the slow part
+    // runs, so the window can carry on drawing.
+    let items: Vec<(NodeId, PathBuf, u64)> = with_tree(&app.state::<AppState>(), |tree| {
+        let picked: HashSet<NodeId> = ids.iter().copied().collect();
+        Ok(ids
+            .iter()
+            .copied()
+            // Skip anything already gone, and anything inside a folder
+            // that's going too: it goes to the Trash with its folder.
+            .filter(|&id| tree.contains(id) && id != tree.root())
+            .filter(|&id| !tree.ancestors(id).iter().any(|a| picked.contains(a)))
+            .map(|id| (id, tree.path(id), tree[id].size))
+            .collect())
+    })?;
+
+    let handle = app.clone();
+    let paths: Vec<(PathBuf, u64)> = items.iter().map(|(_, p, s)| (p.clone(), *s)).collect();
+    let failed = tauri::async_runtime::spawn_blocking(move || {
+        let total = paths.len();
+        let (mut done, mut bytes) = (0, 0);
+        let mut failed = Vec::new();
+        for batch in paths.chunks(TRASH_BATCH) {
+            if handle
+                .state::<AppState>()
+                .stop_trash
+                .load(Ordering::Relaxed)
+            {
+                break;
             }
-            let path = tree.path(id);
-            match trash::delete(&path) {
-                Ok(()) => result.freed += tree.remove(id),
-                Err(e) => result.failed.push(format!("{}: {e}", path.display())),
+            let batch_paths: Vec<&PathBuf> = batch.iter().map(|(p, _)| p).collect();
+            if trash::delete_all(&batch_paths).is_err() {
+                // Something in this batch went wrong. Go through it one at a
+                // time to find out what.
+                for path in batch_paths {
+                    if path.symlink_metadata().is_ok()
+                        && let Err(e) = trash::delete(path)
+                    {
+                        failed.push(format!("{}: {e}", path.display()));
+                    }
+                }
+            }
+            done += batch.len();
+            bytes += batch.iter().map(|(_, s)| s).sum::<u64>();
+            handle
+                .emit("trash-progress", TrashProgress { done, total, bytes })
+                .ok();
+        }
+        failed
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // Take out of the tree whatever really left the disk.
+    with_tree_mut(&app.state::<AppState>(), |tree| {
+        let mut freed = 0;
+        for (id, path, _) in items {
+            // A new scan may have replaced the tree while we were busy.
+            if tree.contains(id) && tree.path(id) == path && path.symlink_metadata().is_err() {
+                freed += tree.remove(id);
             }
         }
-        Ok(result)
+        Ok(TrashResult { freed, failed })
     })
+}
+
+/// Stops a move to the Trash after the batch it's on. What has gone
+/// already stays in the Trash.
+#[tauri::command]
+pub fn cancel_trash(state: State<AppState>) {
+    state.stop_trash.store(true, Ordering::Relaxed);
 }
 
 #[derive(Serialize)]

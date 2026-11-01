@@ -253,6 +253,26 @@ function renderDetails() {
           lastScan && lastScan.errors > 0
             ? h("span", { class: "muted" }, ` · ${formatCount(lastScan.errors)} couldn't be read`)
             : null,
+          lastScan && lastScan.guarded > 0
+            ? h(
+                "span",
+                { class: "muted", title: "macOS asks separately about each app's data, so Roomy left it out" },
+                " · other apps' data skipped (",
+                h(
+                  "a",
+                  {
+                    href: "#",
+                    class: "link",
+                    onclick: (e: Event) => {
+                      e.preventDefault();
+                      api.fullDiskAccess();
+                    },
+                  },
+                  "allow Full Disk Access",
+                ),
+                ")",
+              )
+            : null,
         ),
         h("div", { class: "path" }, current.path),
       ),

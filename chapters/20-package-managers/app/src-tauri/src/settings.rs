@@ -33,6 +33,9 @@ impl Settings {
         ScanOptions {
             one_file_system: self.one_file_system,
             exclude: self.exclude.clone(),
+            // Not saved: it depends on whether you've given Roomy Full
+            // Disk Access, which can change between one scan and the next.
+            guarded: roomy_core::scan::guarded_folders(),
         }
     }
 
