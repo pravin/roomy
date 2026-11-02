@@ -53,7 +53,7 @@ impl Detector for ProjectArtifact {
         let Some(parent) = node.parent else {
             return false; // The folder you scanned is never junk
         };
-        has_child(parent, self.next_to) && has_child(id, self.contains)
+        has_child(parent, self.next_to) && has_child(id, self.contains) && !off_limits(tree, parent)
     }
 }
 
@@ -88,6 +88,16 @@ impl Detector for KnownCache {
 /// Every detector Roomy knows about.
 pub fn detectors() -> Vec<Box<dyn Detector>> {
     const JS: &[&str] = &["package.json"];
+    // A project you ran `npm install` in has a lockfile. A package someone
+    // published, like npm itself, has a package.json but no lockfile.
+    const JS_LOCKS: &[&str] = &[
+        "package-lock.json",
+        "npm-shrinkwrap.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "bun.lock",
+        "bun.lockb",
+    ];
     const GRADLE: &[&str] = &[
         "build.gradle",
         "build.gradle.kts",
@@ -97,7 +107,7 @@ pub fn detectors() -> Vec<Box<dyn Detector>> {
     vec![
         Box::new(ProjectArtifact {
             folder: "node_modules",
-            next_to: JS,
+            next_to: JS_LOCKS,
             contains: &[],
             description: "JavaScript packages. Run `npm install` to get them back.",
         }),
@@ -256,6 +266,80 @@ pub fn find(tree: &Tree, start: NodeId, detectors: &[Box<dyn Detector>]) -> Vec<
     found
 }
 
+/// Places Roomy leaves alone, as runs of folder names. Installed software
+/// first: a project folder inside one belongs to a program you use, not to
+/// a project of yours, and the program may stop working without it. npm,
+/// for one, is itself a package with a `package.json` and a `node_modules`,
+/// in `lib/node_modules/npm` inside every Node install.
+const OFF_LIMITS: &[&[&str]] = &[
+    &["node_modules"], // Packages inside packages: part of whatever installed them
+    &["site-packages"],
+    &["dist-packages"],
+    &["mise", "installs"],
+    &[".asdf", "installs"],
+    &[".nvm", "versions"],
+    &[".volta", "tools"],
+    &["fnm", "node-versions"],
+    &[".fnm", "node-versions"],
+    &["pnpm", "global"],
+    &[".bun", "install"],
+    &[".pyenv", "versions"],
+    &[".rustup"],
+    &[".pub-cache"],
+    &["fvm", "versions"],
+    &["Android", "sdk"],
+    &["google-cloud-sdk"],
+    &[".linuxbrew"], // Homebrew on Linux; on a Mac it lives in /opt or /usr
+    &[".vscode", "extensions"],
+    &[".vscode-server"],
+    &[".cursor", "extensions"],
+    &["Program Files"],
+    &["Program Files (x86)"],
+    // And the Trash: it's already on its way out
+    &[".Trash"],
+    &[".Trashes"],
+    &["$Recycle.Bin"],
+    &["Trash", "files"],
+];
+
+/// Folders at the top of the disk that belong to the system or to installed
+/// software, never to your projects.
+const OFF_LIMITS_ROOTS: &[&str] = &[
+    "/Applications",
+    "/Library",
+    "/System",
+    "/usr",
+    "/opt",
+    "/nix",
+    "/snap",
+];
+
+/// Should Roomy leave `id` and everything in it alone? Only called for
+/// folders that already look like junk, so building the path here costs
+/// next to nothing.
+fn off_limits(tree: &Tree, id: NodeId) -> bool {
+    let path = tree.path(id);
+    if OFF_LIMITS_ROOTS.iter().any(|root| path.starts_with(root)) {
+        return true;
+    }
+    let names: Vec<&std::ffi::OsStr> = path
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(name) => Some(name),
+            _ => None,
+        })
+        .collect();
+    // An app bundle on a Mac, like Visual Studio Code.app, carries its own packages.
+    if names.iter().any(|n| n.to_string_lossy().ends_with(".app")) {
+        return true;
+    }
+    OFF_LIMITS.iter().any(|run| {
+        names
+            .windows(run.len())
+            .any(|w| w.iter().zip(run.iter()).all(|(a, b)| *a == *b))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,6 +355,7 @@ mod tests {
                         "website",
                         vec![
                             file("package.json", 1),
+                            file("package-lock.json", 1),
                             dir("node_modules", vec![file("react.js", 500)]),
                         ],
                     ),
@@ -299,5 +384,122 @@ mod tests {
             tree.path(found[1].id),
             Path::new("/home/me/website/node_modules")
         );
+    }
+
+    /// The folders a Node install keeps npm in, as mise, nvm and Homebrew
+    /// lay them out. Every one of them looks like a project, and none is junk.
+    fn npm_inside(install: Vec<&str>) -> Tree {
+        let npm = dir(
+            "npm",
+            vec![
+                file("package.json", 1),
+                // Some packages ship a lockfile, so that alone isn't enough
+                file("npm-shrinkwrap.json", 1),
+                dir("node_modules", vec![file("graceful-fs.js", 80)]),
+            ],
+        );
+        let mut entry = dir("lib", vec![dir("node_modules", vec![npm])]);
+        for name in install.into_iter().rev() {
+            entry = dir(name, vec![entry]);
+        }
+        Tree::from_entry("/home/me".into(), dir("/home/me", vec![entry]))
+    }
+
+    #[test]
+    fn leaves_npm_inside_node_installs_alone() {
+        for install in [
+            vec![".local", "share", "mise", "installs", "node", "25.9.0"],
+            vec![".nvm", "versions", "node", "v22.13.1"],
+            vec!["opt", "homebrew"],
+        ] {
+            let tree = npm_inside(install.clone());
+            let found = find(&tree, tree.root(), &detectors());
+            assert!(found.is_empty(), "{install:?}: {found:?}");
+        }
+    }
+
+    #[test]
+    fn needs_a_lockfile_for_node_modules() {
+        let tree = Tree::from_entry(
+            "/home/me".into(),
+            dir(
+                "/home/me",
+                vec![dir(
+                    "some-package",
+                    vec![
+                        file("package.json", 1),
+                        dir("node_modules", vec![file("x.js", 50)]),
+                    ],
+                )],
+            ),
+        );
+        assert!(find(&tree, tree.root(), &detectors()).is_empty());
+    }
+
+    #[test]
+    fn leaves_apps_extensions_sdks_and_the_trash_alone() {
+        let project = || {
+            vec![
+                file("package.json", 1),
+                file("package-lock.json", 1),
+                dir("node_modules", vec![file("x.js", 50)]),
+            ]
+        };
+        let tree = Tree::from_entry(
+            "/home/me".into(),
+            dir(
+                "/home/me",
+                vec![
+                    dir(
+                        "Applications",
+                        vec![dir(
+                            "Visual Studio Code.app",
+                            vec![dir("Contents", vec![dir("app", project())])],
+                        )],
+                    ),
+                    dir(
+                        ".vscode",
+                        vec![dir("extensions", vec![dir("prettier", project())])],
+                    ),
+                    dir(".Trash", vec![dir("old-site", project())]),
+                    dir(
+                        "Tools",
+                        vec![dir(
+                            "google-cloud-sdk",
+                            vec![dir("lib", vec![dir("__pycache__", vec![file("x.pyc", 9)])])],
+                        )],
+                    ),
+                    dir(
+                        ".venvs",
+                        vec![dir("tool", vec![dir(".venv", vec![file("pyvenv.cfg", 1)])])],
+                    ),
+                ],
+            ),
+        );
+        let found = find(&tree, tree.root(), &detectors());
+        let paths: Vec<_> = found.iter().map(|j| tree.path(j.id)).collect();
+        // Only the virtual environment, which isn't inside installed software
+        assert_eq!(paths, [Path::new("/home/me/.venvs/tool/.venv")]);
+    }
+
+    #[test]
+    fn leaves_the_system_alone() {
+        let tree = Tree::from_entry(
+            "/".into(),
+            dir(
+                "/",
+                vec![dir(
+                    "Library",
+                    vec![dir(
+                        "Frameworks",
+                        vec![dir(
+                            "Python.framework",
+                            vec![dir("__pycache__", vec![file("x.pyc", 9)])],
+                        )],
+                    )],
+                )],
+            ),
+        );
+        assert!(find(&tree, tree.root(), &detectors()).is_empty());
     }
 }

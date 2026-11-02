@@ -55,7 +55,7 @@ Run again with --clean to move them to the Trash.
 
 Not its name. A folder called `target` might be Rust's build output, or it might be where you keep photos of targets. A folder called `build` is junk in a Gradle project and probably precious anywhere else.
 
-What gives it away is what's next to it. Rust's `target` sits beside a `Cargo.toml`. `node_modules` sits beside a `package.json`. A Python virtual environment has a `pyvenv.cfg` *inside* it. If we insist on those, we only ever pick folders a tool made.
+What gives it away is what's next to it. Rust's `target` sits beside a `Cargo.toml`. A project's `node_modules` sits beside the lockfile `npm install` wrote, like `package-lock.json`. A Python virtual environment has a `pyvenv.cfg` *inside* it. If we insist on those, we only ever pick folders a tool made.
 
 Caches are different. They live at known places in your home folder, like `~/.npm/_cacache` or `~/Library/Developer/Xcode/DerivedData`, so the way to spot them is the end of their path.
 
@@ -110,7 +110,7 @@ A *trait* is a list of methods a type promises to have. We've used plenty of the
 53          let Some(parent) = node.parent else {
 54              return false; // The folder you scanned is never junk
 55          };
-56          has_child(parent, self.next_to) && has_child(id, self.contains)
+56          has_child(parent, self.next_to) && has_child(id, self.contains) && !off_limits(tree, parent)
 57      }
 ```
 
@@ -118,7 +118,7 @@ The name check comes first [line 43], because it's cheap and nearly every folder
 
 `has_child` [line 46] is a *closure*, a small function written inline that can see the variables around it, here `tree`. It asks "does this folder have a child with one of these names?". An empty list means "don't care" [line 47].
 
-Then the real test [line 56]: is there a project file in the parent, and the right thing inside the folder? Notice we don't touch the disk. The scan already knows every name in every folder, so asking what's next to `node_modules` is a look at its parent's children. Thousands of checks take no time at all.
+Then the real test [line 56]: is there a project file in the parent, the right thing inside the folder, and is it somewhere we're allowed to touch? More on `off_limits` in a moment. Notice we don't touch the disk. The scan already knows every name in every folder, so asking what's next to `node_modules` is a look at its parent's children. Thousands of checks take no time at all.
 
 ### At a known place
 
@@ -138,6 +138,79 @@ Then the real test [line 56]: is there a project file in the parent, and the rig
 
 We don't care where your home folder is. If you scan `/`, the npm cache is still `.../.npm/_cacache`.
 
+### Leave installed software alone
+
+The first version of this chapter stopped there, with `next_to: &["package.json"]` for `node_modules`. Then someone pointed the finished Roomy at their whole home folder, cleaned up, and found `npm` had stopped working. Every `npm` command failed with `Cannot find module 'graceful-fs'`.
+
+Here's why. npm is itself a package, and a Node install keeps it in `lib/node_modules/npm`. That folder has a `package.json`, and next to it a `node_modules` with npm's own dependencies. To our detector that looks exactly like a project. So does every package inside a VS Code extension, a Python install's `site-packages`, or an app bundle. None of them is junk. They're parts of programs you use.
+
+Two rules fix it. The first is in the list of detectors: a `node_modules` must sit next to a *lockfile*, not just a `package.json`. You get a `package-lock.json`, `yarn.lock` or `pnpm-lock.yaml` when you run an install in a project of your own. Packages that someone published almost never ship one.
+
+The second is `off_limits`, which every project detector checks [line 56]:
+
+```text
+274 const OFF_LIMITS: &[&[&str]] = &[
+275     &["node_modules"], // Packages inside packages: part of whatever installed them
+276     &["site-packages"],
+277     &["dist-packages"],
+278     &["mise", "installs"],
+279     &[".asdf", "installs"],
+280     &[".nvm", "versions"],
+281     &[".volta", "tools"],
+...
+299     &[".Trash"],
+300     &[".Trashes"],
+301     &["$Recycle.Bin"],
+302     &["Trash", "files"],
+303 ];
+304
+305 /// Folders at the top of the disk that belong to the system or to installed
+306 /// software, never to your projects.
+307 const OFF_LIMITS_ROOTS: &[&str] = &[
+308     "/Applications",
+309     "/Library",
+310     "/System",
+311     "/usr",
+312     "/opt",
+313     "/nix",
+314     "/snap",
+315 ];
+316
+317 /// Should Roomy leave `id` and everything in it alone? Only called for
+318 /// folders that already look like junk, so building the path here costs
+319 /// next to nothing.
+320 fn off_limits(tree: &Tree, id: NodeId) -> bool {
+321     let path = tree.path(id);
+322     if OFF_LIMITS_ROOTS.iter().any(|root| path.starts_with(root)) {
+323         return true;
+324     }
+325     let names: Vec<&std::ffi::OsStr> = path
+326         .components()
+327         .filter_map(|c| match c {
+328             std::path::Component::Normal(name) => Some(name),
+329             _ => None,
+330         })
+331         .collect();
+332     // An app bundle on a Mac, like Visual Studio Code.app, carries its own packages.
+333     if names.iter().any(|n| n.to_string_lossy().ends_with(".app")) {
+334         return true;
+335     }
+336     OFF_LIMITS.iter().any(|run| {
+337         names
+338             .windows(run.len())
+339             .any(|w| w.iter().zip(run.iter()).all(|(a, b)| *a == *b))
+340     })
+341 }
+```
+
+`OFF_LIMITS` is a list of *runs* of folder names: `mise/installs`, `.nvm/versions`, `.vscode/extensions`, `site-packages`. Anything below one of them is installed software, and so is anything below a folder called `node_modules` [line 275], because a package's own packages belong to whatever installed it. The Trash is on the list too. Offering to move the Trash to the Trash isn't helpful. `OFF_LIMITS_ROOTS` covers the top of the disk, where the system and Homebrew keep their things.
+
+`path.components()` [line 326] splits a path into its parts. We keep the `Normal` ones, which are the folder names, and drop the root and any `..`. Then `windows(run.len())` [line 338] slides a window as long as the run along the names, so `["mise", "installs"]` matches `.../share/mise/installs/node/...` wherever it sits. It's the same idea as `Path::ends_with` below, but it can match in the middle.
+
+This one does build a path, which we said was slow. But it only runs for folders that have already passed every other test, a few hundred on a whole disk, so you won't notice it.
+
+A deleting tool can't be trusted on its own say-so. The tests in `junk.rs` now build a Node install as mise, nvm and Homebrew lay it out, an app bundle, an editor extension and the Trash, and check that Roomy finds nothing to clean in any of them. If you add a detector, add the place it must never look to those tests too.
+
 ### A list of different things
 
 Here's the problem. We want one list of all the detectors, but they're different types, `ProjectArtifact` and `KnownCache`, and a `Vec` holds one type.
@@ -145,20 +218,35 @@ Here's the problem. We want one list of all the detectors, but they're different
 ```text
 89  pub fn detectors() -> Vec<Box<dyn Detector>> {
 90      const JS: &[&str] = &["package.json"];
-...
-97      vec![
-98          Box::new(ProjectArtifact {
-99              folder: "node_modules",
-100             next_to: JS,
-101             contains: &[],
-102             description: "JavaScript packages. Run `npm install` to get them back.",
-103         }),
-104         Box::new(ProjectArtifact {
-105             folder: "target",
-106             next_to: &["Cargo.toml"],
-107             contains: &[],
-108             description: "Rust build output. `cargo build` makes it again.",
-109         }),
+91      // A project you ran `npm install` in has a lockfile. A package someone
+92      // published, like npm itself, has a package.json but no lockfile.
+93      const JS_LOCKS: &[&str] = &[
+94          "package-lock.json",
+95          "npm-shrinkwrap.json",
+96          "yarn.lock",
+97          "pnpm-lock.yaml",
+98          "bun.lock",
+99          "bun.lockb",
+100     ];
+101     const GRADLE: &[&str] = &[
+102         "build.gradle",
+103         "build.gradle.kts",
+104         "settings.gradle",
+105         "settings.gradle.kts",
+106     ];
+107     vec![
+108         Box::new(ProjectArtifact {
+109             folder: "node_modules",
+110             next_to: JS_LOCKS,
+111             contains: &[],
+112             description: "JavaScript packages. Run `npm install` to get them back.",
+113         }),
+114         Box::new(ProjectArtifact {
+115             folder: "target",
+116             next_to: &["Cargo.toml"],
+117             contains: &[],
+118             description: "Rust build output. `cargo build` makes it again.",
+119         }),
 ```
 
 `dyn Detector` means "some type that implements `Detector`, I won't say which". That's a *trait object*. Rust can't put one directly in a `Vec`, because different types have different sizes, and each slot in a `Vec` must be the same size. A `Box` fixes that. It puts the value on the heap and keeps a pointer to it, and pointers are all the same size.
@@ -170,31 +258,31 @@ The list itself is just data. There are thirteen kinds of project folder and nin
 ### Finding it all
 
 ```text
-236  pub fn find(tree: &Tree, start: NodeId, detectors: &[Box<dyn Detector>]) -> Vec<JunkItem> {
-237      let mut found = Vec::new();
-238      let mut stack = vec![start];
-239      while let Some(id) = stack.pop() {
-240          for &child in &tree[id].children {
-241              if tree[child].kind != Kind::Dir {
-242                  continue;
-243              }
-244              match detectors.iter().find(|d| d.matches(tree, child)) {
-245                  Some(detector) => found.push(JunkItem {
-246                      id: child,
-247                      name: detector.name().to_string(),
-248                      description: detector.description().to_string(),
-249                      size: tree[child].size,
-250                  }),
-251                  None => stack.push(child),
-252              }
-253          }
-254      }
-255      found.sort_by_key(|j| std::cmp::Reverse(j.size));
-256      found
-257  }
+246 pub fn find(tree: &Tree, start: NodeId, detectors: &[Box<dyn Detector>]) -> Vec<JunkItem> {
+247     let mut found = Vec::new();
+248     let mut stack = vec![start];
+249     while let Some(id) = stack.pop() {
+250         for &child in &tree[id].children {
+251             if tree[child].kind != Kind::Dir {
+252                 continue;
+253             }
+254             match detectors.iter().find(|d| d.matches(tree, child)) {
+255                 Some(detector) => found.push(JunkItem {
+256                     id: child,
+257                     name: detector.name().to_string(),
+258                     description: detector.description().to_string(),
+259                     size: tree[child].size,
+260                 }),
+261                 None => stack.push(child),
+262             }
+263         }
+264     }
+265     found.sort_by_key(|j| std::cmp::Reverse(j.size));
+266     found
+267 }
 ```
 
-The same stack walk as `descendants` in chapter 13, with one difference. When a folder turns out to be junk, we note it and *don't* go inside [line 251 only pushes folders that aren't]. A `node_modules` has hundreds of `node_modules` inside it, and we don't want to list them all, or count their bytes twice. The size of a folder already includes everything in it.
+The same stack walk as `descendants` in chapter 13, with one difference. When a folder turns out to be junk, we note it and *don't* go inside [line 261 only pushes folders that aren't]. A `node_modules` has hundreds of `node_modules` inside it, and we don't want to list them all, or count their bytes twice. The size of a folder already includes everything in it.
 
 ### The tab
 

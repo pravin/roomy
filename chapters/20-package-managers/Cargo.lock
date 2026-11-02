@@ -3330,7 +3330,7 @@ dependencies = [
 
 [[package]]
 name = "roomy"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "clap",
  "roomy-core",
@@ -3339,7 +3339,7 @@ dependencies = [
 
 [[package]]
 name = "roomy-app"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "roomy-core",
  "serde",
@@ -3357,7 +3357,7 @@ dependencies = [
 
 [[package]]
 name = "roomy-core"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "blake3",
  "rayon",
